@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from fractions import Fraction
 
 from calibration.design import CalibrationDesign
-from calibration.least_squares import fitted_values, residual_vector
+from calibration.least_squares import residual_vector
 from protocol.rationals import RationalInput, parse_rational
 
 
@@ -35,12 +35,18 @@ class FrozenEvidence:
 
 
 def build_evidence(design: CalibrationDesign) -> FrozenEvidence:
+    # The projection is linear in the response, so each specimen's residual is
+    # affine in the candidate: residual(c) = reference + c * influence, where
+    # influence is the residual vector of the lone-target response. Every
+    # specimen, not just the target, inherits its slope from the joint fit.
     reference = residual_vector(design.matrix, design.response_at(Fraction(0)))
     target_indicator = (Fraction(0),) * len(design.specimen_ids) + (Fraction(1),)
-    target_leverage = fitted_values(design.matrix, target_indicator)[-1]
+    influence = residual_vector(design.matrix, target_indicator)
     originals = tuple(
-        (specimen_id, AffineResidual(value, Fraction(0)))
-        for specimen_id, value in zip(design.specimen_ids, reference[:-1])
+        (specimen_id, AffineResidual(intercept, slope))
+        for specimen_id, intercept, slope in zip(
+            design.specimen_ids, reference[:-1], influence[:-1]
+        )
     )
-    target = AffineResidual(reference[-1], Fraction(1) - target_leverage)
+    target = AffineResidual(reference[-1], influence[-1])
     return FrozenEvidence(originals, target)
